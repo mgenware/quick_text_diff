@@ -1,6 +1,6 @@
 name: quick_text_diff
-description: "A selectable, side-by-side desktop text diff that always hides unchanged lines."
-version: 0.0.1
+description: "An opinionated, selectable, side-by-side text diff for Flutter."
+version: 1.0.0
 homepage:
 
 environment:

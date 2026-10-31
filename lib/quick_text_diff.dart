@@ -15,7 +15,7 @@ class TextDiffSpan {
   final bool isChanged;
 }
 
-/// One changed source line. Line numbers are one-based.
+/// One source line. Line numbers are one-based.
 @immutable
 class TextDiffLine {
   TextDiffLine({
@@ -31,17 +31,19 @@ class TextDiffLine {
   final List<TextDiffSpan> spans;
 }
 
-/// An aligned pair of changed lines. A null side is an empty placeholder.
+/// An aligned pair of lines. A null side is an empty placeholder.
 @immutable
 class TextDiffRow {
   const TextDiffRow({
     this.oldLine,
     this.newLine,
     this.collapsedLinesBefore = 0,
+    this.isChanged = true,
   });
 
   final TextDiffLine? oldLine;
   final TextDiffLine? newLine;
+  final bool isChanged;
 
   /// Hidden unchanged lines between this row and the preceding changed block.
   final int collapsedLinesBefore;
@@ -49,16 +51,31 @@ class TextDiffRow {
 
 /// Line-level differences with character highlights inside replacements.
 ///
-/// Unchanged lines are never included. CRLF is normalized to LF, but a missing
+/// Unchanged lines are included only when requested. CRLF is normalized to LF, but a missing
 /// final newline is a change. A replacement counts as a deletion and an addition.
 @immutable
 class TextDiff {
   TextDiff._(List<TextDiffRow> rows)
     : rows = List.unmodifiable(rows),
-      addedLines = rows.where((row) => row.newLine != null).length,
-      deletedLines = rows.where((row) => row.oldLine != null).length;
+      addedLines = rows
+          .where((row) => row.isChanged && row.newLine != null)
+          .length,
+      deletedLines = rows
+          .where((row) => row.isChanged && row.oldLine != null)
+          .length;
 
-  factory TextDiff.compare(String oldText, String newText) {
+  factory TextDiff.compare(
+    String oldText,
+    String newText, {
+    int surroundingLines = 0,
+  }) {
+    if (surroundingLines < 0) {
+      throw ArgumentError.value(
+        surroundingLines,
+        'surroundingLines',
+        'Must be non-negative',
+      );
+    }
     final oldLines = _splitLines(oldText);
     final newLines = _splitLines(newText);
     final alignment = List<int?>.generate(oldLines.length, (index) => index);
@@ -81,9 +98,55 @@ class TextDiff {
     var oldIndex = 0;
     var newIndex = 0;
     var collapsedLines = 0;
+    void appendContext({required bool followingChange}) {
+      final leading = rows.isEmpty
+          ? 0
+          : math.min(surroundingLines, collapsedLines);
+      final trailing = followingChange
+          ? math.min(surroundingLines, collapsedLines)
+          : 0;
+      var hidden = 0;
+      for (var offset = 0; offset < collapsedLines; offset++) {
+        if (offset >= leading && offset < collapsedLines - trailing) {
+          hidden++;
+          continue;
+        }
+        TextDiffLine buildContextLine(List<String> source, int index) {
+          final raw = source[index];
+          final text = _displayText(raw);
+          return TextDiffLine(
+            lineNumber: index + 1,
+            text: text,
+            hasNewline: raw.endsWith('\n'),
+            spans: [TextDiffSpan(text, isChanged: false)],
+          );
+        }
+
+        rows.add(
+          TextDiffRow(
+            oldLine: buildContextLine(
+              oldLines,
+              oldIndex - collapsedLines + offset,
+            ),
+            newLine: buildContextLine(
+              newLines,
+              newIndex - collapsedLines + offset,
+            ),
+            isChanged: false,
+            collapsedLinesBefore: rows.isEmpty ? 0 : hidden,
+          ),
+        );
+        hidden = 0;
+      }
+      collapsedLines = hidden;
+    }
+
     void appendBlock(int oldEnd, int newEnd) {
       final deletedCount = oldEnd - oldIndex;
       final addedCount = newEnd - newIndex;
+      if (deletedCount > 0 || addedCount > 0) {
+        appendContext(followingChange: true);
+      }
       for (var row = 0; row < math.max(deletedCount, addedCount); row++) {
         final oldNumber = row < deletedCount ? oldIndex + row : null;
         final newNumber = row < addedCount ? newIndex + row : null;
@@ -134,6 +197,7 @@ class TextDiff {
       collapsedLines++;
     }
     appendBlock(oldLines.length, newLines.length);
+    appendContext(followingChange: false);
     return TextDiff._(rows);
   }
 
@@ -197,7 +261,7 @@ class QuickTextDiffColors {
   final Color divider;
 }
 
-/// A desktop split diff with selectable text and no unchanged lines.
+/// A desktop split diff with selectable text and surrounding unchanged lines.
 ///
 /// Give this widget bounded width and height, for example with [Expanded].
 /// Vertical scrolling is shared; each side scrolls horizontally independently.
@@ -210,8 +274,10 @@ class QuickTextDiff extends StatefulWidget {
     this.colors,
     this.lineHeight = 24,
     this.columnGap = 32,
+    this.surroundingLines = 3,
   }) : assert(lineHeight > 0),
-       assert(columnGap >= 0);
+       assert(columnGap >= 0),
+       assert(surroundingLines >= 0);
 
   final String oldText;
   final String newText;
@@ -219,6 +285,9 @@ class QuickTextDiff extends StatefulWidget {
   final QuickTextDiffColors? colors;
   final double lineHeight;
   final double columnGap;
+
+  /// Unchanged lines shown before and after each change. Overlapping windows merge.
+  final int surroundingLines;
 
   @override
   State<QuickTextDiff> createState() => _QuickTextDiffState();
@@ -240,13 +309,18 @@ class _QuickTextDiffState extends State<QuickTextDiff> {
   void didUpdateWidget(QuickTextDiff oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.oldText != widget.oldText ||
-        oldWidget.newText != widget.newText) {
+        oldWidget.newText != widget.newText ||
+        oldWidget.surroundingLines != widget.surroundingLines) {
       _compare();
     }
   }
 
   void _compare() {
-    _diff = TextDiff.compare(widget.oldText, widget.newText);
+    _diff = TextDiff.compare(
+      widget.oldText,
+      widget.newText,
+      surroundingLines: widget.surroundingLines,
+    );
   }
 
   @override
@@ -458,7 +532,9 @@ class _QuickTextDiffState extends State<QuickTextDiff> {
                                 child: const SizedBox.expand(),
                               )
                             : ColoredBox(
-                                color: isOld
+                                color: !_diff.rows[index].isChanged
+                                    ? colors.background
+                                    : isOld
                                     ? colors.deletion
                                     : colors.addition,
                                 child: Row(
@@ -521,7 +597,10 @@ class _QuickTextDiffState extends State<QuickTextDiff> {
                                               ],
                                             ),
                                             style: style.copyWith(
-                                              color: isOld
+                                              color:
+                                                  !_diff.rows[index].isChanged
+                                                  ? colors.foreground
+                                                  : isOld
                                                   ? colors.deletionText
                                                   : colors.additionText,
                                             ),

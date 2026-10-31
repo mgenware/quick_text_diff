@@ -9,6 +9,7 @@ A side-by-side text diff for Flutter desktop.
 ## Features
 
 - Opinionated: always hides unchanged lines, with collapsed-line counts between edits.
+- Hides remaining unchanged lines, with collapsed-line counts between sections.
 - Selectable text on both sides with original line numbers.
 - Added/deleted line summary and inline change highlights.
 - Compact, aligned rows with hatched placeholders for missing lines.
@@ -31,6 +32,13 @@ const Scaffold(
 
 Use inside a `MaterialApp` with bounded width and height, such as a `Scaffold`
 body or an `Expanded` widget. Customize with `textStyle`, `colors`, `lineHeight`,
-and `columnGap`.
+and `columnGap`. Set `surroundingLines` to change the context size (default: `3`)
+or use `0` to show only changed lines. Connected context windows merge into one
+section, including chains of multiple edits. Context lines do not affect the
+added/deleted summary.
+
+`TextDiff.compare(oldText, newText, surroundingLines: 3)` includes the same context
+in the comparison model. Its default remains `0`; context rows have
+`isChanged: false`.
 
 Runnable macOS and Windows demo: [example/README.md](example/README.md).

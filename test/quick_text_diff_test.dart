@@ -109,6 +109,100 @@ void main() {
     }
   });
 
+  test('context preserves numbers and counts and merges chained changes', () {
+    final oldLines = List.generate(30, (index) => 'line $index\n');
+    final newLines = [...oldLines];
+    for (final index in [5, 8, 11, 25]) {
+      newLines[index] = 'replacement $index\n';
+    }
+    final diff = TextDiff.compare(
+      oldLines.join(),
+      newLines.join(),
+      surroundingLines: 3,
+    );
+    expect(diff.rows.map((row) => row.oldLine!.lineNumber), [
+      ...List.generate(13, (index) => index + 3),
+      ...List.generate(7, (index) => index + 23),
+    ]);
+    expect(
+      diff.rows
+          .where((row) => row.collapsedLinesBefore > 0)
+          .single
+          .collapsedLinesBefore,
+      7,
+    );
+    expect(diff.addedLines, 4);
+    expect(diff.deletedLines, 4);
+    for (final row in diff.rows.where((row) => !row.isChanged)) {
+      expect(row.oldLine!.text, row.newLine!.text);
+      expect(row.oldLine!.spans.single.isChanged, isFalse);
+    }
+  });
+
+  test('context merges touching windows and separates only hidden lines', () {
+    for (final gap in [6, 7]) {
+      final oldLines = List.generate(gap + 2, (index) => 'line $index\n');
+      final newLines = [...oldLines];
+      newLines[0] = 'first\n';
+      newLines[gap + 1] = 'last\n';
+      final diff = TextDiff.compare(
+        oldLines.join(),
+        newLines.join(),
+        surroundingLines: 3,
+      );
+      expect(diff.rows, hasLength(8));
+      expect(
+        diff.rows
+            .map((row) => row.collapsedLinesBefore)
+            .reduce((total, count) => total + count),
+        gap - 6,
+      );
+    }
+  });
+
+  test('context aligns source numbers around unequal change blocks', () {
+    final diff = TextDiff.compare(
+      'deleted 1\ndeleted 2\nshared\nold\n',
+      'shared\nnew\nadded\n',
+      surroundingLines: 3,
+    );
+    expect(
+      diff.rows.map(
+        (row) => [row.oldLine?.lineNumber, row.newLine?.lineNumber],
+      ),
+      [
+        [1, null],
+        [2, null],
+        [3, 1],
+        [4, 2],
+        [null, 3],
+      ],
+    );
+    expect(diff.rows[2].isChanged, isFalse);
+    expect(diff.addedLines, 2);
+    expect(diff.deletedLines, 3);
+    expect(diff.rows.every((row) => row.collapsedLinesBefore == 0), isTrue);
+  });
+
+  test('context clips at boundaries and keeps identical input empty', () {
+    final diff = TextDiff.compare(
+      'a\nb\nc\n',
+      'changed\nb\nc\n',
+      surroundingLines: 3,
+    );
+    expect(diff.rows, hasLength(3));
+    expect(diff.addedLines, 1);
+    expect(diff.deletedLines, 1);
+    expect(
+      TextDiff.compare('same\n', 'same\n', surroundingLines: 3).rows,
+      isEmpty,
+    );
+    expect(
+      () => TextDiff.compare('', '', surroundingLines: -1),
+      throwsArgumentError,
+    );
+  });
+
   test('large inputs still omit unchanged lines between separate edits', () {
     final oldLines = List.generate(66000, (index) => 'line $index\n');
     final newLines = [...oldLines];
@@ -161,16 +255,64 @@ void main() {
   Future<void> pumpDiff(
     WidgetTester tester,
     String oldText,
-    String newText,
-  ) async {
+    String newText, {
+    int surroundingLines = 0,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: QuickTextDiff(oldText: oldText, newText: newText),
+          body: QuickTextDiff(
+            oldText: oldText,
+            newText: newText,
+            surroundingLines: surroundingLines,
+          ),
         ),
       ),
     );
   }
+
+  testWidgets(
+    'view defaults to three neutral context lines and updates config',
+    (tester) async {
+      final oldLines = List.generate(9, (index) => 'line $index\n');
+      final newLines = [...oldLines]..[4] = 'replacement\n';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuickTextDiff(
+              oldText: oldLines.join(),
+              newText: newLines.join(),
+            ),
+          ),
+        ),
+      );
+      expect(findLine('line 0'), findsNothing);
+      expect(findLine('line 1'), findsNWidgets(2));
+      expect(findLine('line 7'), findsNWidgets(2));
+      expect(findLine('line 8'), findsNothing);
+      expect(find.text('+1'), findsOneWidget);
+      expect(find.text('-1'), findsOneWidget);
+      final contextBox = tester.widget<ColoredBox>(
+        find
+            .ancestor(
+              of: findLine('line 1').first,
+              matching: find.byType(ColoredBox),
+            )
+            .first,
+      );
+      expect(contextBox.color, const QuickTextDiffColors().background);
+      await pumpDiff(
+        tester,
+        oldLines.join(),
+        newLines.join(),
+        surroundingLines: 1,
+      );
+      expect(findLine('line 1'), findsNothing);
+      expect(findLine('line 3'), findsNWidgets(2));
+      expect(findLine('line 5'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('renders summary, selected sides, highlights and hatched gaps', (
     tester,

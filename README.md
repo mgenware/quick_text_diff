@@ -2,7 +2,7 @@
 
 [![pub.dev version](https://img.shields.io/pub/v/quick_text_diff.svg)](https://pub.dev/packages/quick_text_diff)
 
-A GitHub-style, side-by-side text diff for Flutter desktop.
+A side-by-side text diff for Flutter desktop.
 
 ![Quick Text Diff desktop screenshot](screenshot.avif)
 

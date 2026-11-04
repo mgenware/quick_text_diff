@@ -152,12 +152,10 @@ class TextDiff {
         final newNumber = row < addedCount ? newIndex + row : null;
         final oldLine = oldNumber == null ? null : oldLines[oldNumber];
         final newLine = newNumber == null ? null : newLines[newNumber];
-        final fragments = engine.diff(
+        final fragments = _diffGraphemes(
           _displayText(oldLine ?? ''),
           _displayText(newLine ?? ''),
-          checklines: false,
         );
-        engine.cleanupSemantic(fragments);
         TextDiffLine? buildLine(String? raw, int? number, int excluded) {
           if (raw == null || number == null) return null;
           return TextDiffLine(
@@ -213,6 +211,58 @@ class TextDiff {
 
   static String _displayText(String text) =>
       text.endsWith('\n') ? text.substring(0, text.length - 1) : text;
+
+  static List<engine.Diff> _diffGraphemes(String oldText, String newText) {
+    final graphemeToCodeUnit = <String, int>{};
+    final codeUnitToGrapheme = <int, String>{};
+    var nextCodeUnit = 0;
+    var exhaustedTokens = false;
+
+    String encode(String text) {
+      final codeUnits = <int>[];
+      for (final grapheme in text.characters) {
+        var codeUnit = graphemeToCodeUnit[grapheme];
+        if (codeUnit == null) {
+          while (nextCodeUnit >= 0xD800 && nextCodeUnit <= 0xDFFF) {
+            nextCodeUnit++;
+          }
+          if (nextCodeUnit > 0xFFFF) {
+            exhaustedTokens = true;
+            return text;
+          }
+          codeUnit = nextCodeUnit++;
+          graphemeToCodeUnit[grapheme] = codeUnit;
+          codeUnitToGrapheme[codeUnit] = grapheme;
+        }
+        codeUnits.add(codeUnit);
+      }
+      return String.fromCharCodes(codeUnits);
+    }
+
+    final encodedOld = encode(oldText);
+    final encodedNew = encode(newText);
+    if (exhaustedTokens) {
+      return [
+        engine.Diff(engine.DIFF_DELETE, oldText),
+        engine.Diff(engine.DIFF_INSERT, newText),
+      ];
+    }
+
+    final fragments = engine.diff(encodedOld, encodedNew, checklines: false);
+    engine.cleanupSemantic(fragments);
+    String decode(String text) {
+      final result = StringBuffer();
+      for (final codeUnit in text.codeUnits) {
+        result.write(codeUnitToGrapheme[codeUnit]!);
+      }
+      return result.toString();
+    }
+
+    return [
+      for (final fragment in fragments)
+        engine.Diff(fragment.operation, decode(fragment.text)),
+    ];
+  }
 }
 
 /// Colors for the diff surface. Defaults adapt to the surrounding theme.

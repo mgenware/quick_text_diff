@@ -109,6 +109,35 @@ void main() {
     }
   });
 
+  test('keeps emoji graphemes intact in character highlights', () {
+    const oldText = 'before 😀 👨‍👩‍👧‍👦 after';
+    const newText = 'before 🌍 👨‍👩‍👧‍👦 after';
+    final row = TextDiff.compare(oldText, newText).rows.single;
+    final oldLine = row.oldLine!;
+    final newLine = row.newLine!;
+
+    expect(oldLine.spans.map((span) => span.text).join(), oldText);
+    expect(newLine.spans.map((span) => span.text).join(), newText);
+    expect(
+      oldLine.spans
+          .where((span) => span.isChanged)
+          .map((span) => span.text)
+          .join(),
+      '😀',
+    );
+    expect(
+      newLine.spans
+          .where((span) => span.isChanged)
+          .map((span) => span.text)
+          .join(),
+      '🌍',
+    );
+    expect(
+      oldLine.spans.any((span) => span.text.contains('👨‍👩‍👧‍👦')),
+      isTrue,
+    );
+  });
+
   test('context preserves numbers and counts and merges chained changes', () {
     final oldLines = List.generate(30, (index) => 'line $index\n');
     final newLines = [...oldLines];

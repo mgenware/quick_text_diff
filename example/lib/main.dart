@@ -8,6 +8,7 @@ enum DiffSample {
   code('Code changes'),
   collapsed('Collapsed context'),
   identical('Identical text'),
+  emoji('Emoji changes'),
   longLines('Long lines');
 
   const DiffSample(this.label);
@@ -49,6 +50,16 @@ enum DiffSample {
           'new second\n',
     ),
     identical => ('Nothing changed here.\n', 'Nothing changed here.\n'),
+    emoji => (
+      'Status: ready 😀\n'
+          'Team: 👨‍👩‍👧‍👦\n'
+          'Region: 🇺🇸\n'
+          'Note: all systems go ✨\n',
+      'Status: shipped 🚀\n'
+          'Team: 👨‍👩‍👧‍👦\n'
+          'Region: 🇨🇦\n'
+          'Note: all systems go ✨\n',
+    ),
     longLines => (
       List.generate(
         40,

@@ -1,6 +1,6 @@
 name: quick_text_diff
 description: "An opinionated, selectable, side-by-side text diff for Flutter."
-version: 1.1.0
+version: 1.2.0
 homepage: https://github.com/mgenware/quick_text_diff
 
 environment:
